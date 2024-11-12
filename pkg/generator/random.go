@@ -123,12 +123,12 @@ func (r *randomSrc) Object() *Object {
 	atomic.AddUint64(&r.counter, 1)
 	var nBuf [16]byte
 	randASCIIBytes(nBuf[:], r.rng)
-	r.obj.Size = r.o.getSize(r.rng)
-	r.obj.setName(fmt.Sprintf("%d.%s.rnd", atomic.LoadUint64(&r.counter), string(nBuf[:])))
 
-	// Reset scrambler
-	r.obj.Reader = r.buf.Reset(r.obj.Size)
-	return &r.obj
+	obj := &Object{}
+	obj.Size = r.o.getSize(r.rng)
+	obj.setName(fmt.Sprintf("%d.%s.rnd", atomic.LoadUint64(&r.counter), string(nBuf[:])))
+	obj.Reader = r.buf.Reset(obj.Size)
+	return obj
 }
 
 func (r *randomSrc) String() string {

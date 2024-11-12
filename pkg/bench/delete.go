@@ -52,7 +52,7 @@ func (d *Delete) Prepare(ctx context.Context) error {
 		cl, done := d.Client()
 
 		// ensure the bucket exist
-		found, err := cl.BucketExists(ctx, d.Bucket)
+		found, err := cl.GoClient.BucketExists(ctx, d.Bucket)
 		if err != nil {
 			return err
 		}
@@ -63,7 +63,7 @@ func (d *Delete) Prepare(ctx context.Context) error {
 		// list all objects
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
-		objectCh := cl.ListObjects(ctx, d.Bucket, minio.ListObjectsOptions{
+		objectCh := cl.GoClient.ListObjects(ctx, d.Bucket, minio.ListObjectsOptions{
 			Prefix:    d.ListPrefix,
 			Recursive: !d.ListFlat,
 		})
@@ -139,12 +139,12 @@ func (d *Delete) Prepare(ctx context.Context) error {
 					Size:     obj.Size,
 					File:     obj.Name,
 					ObjPerOp: 1,
-					Endpoint: client.EndpointURL().String(),
+					Endpoint: client.GoClient.EndpointURL().String(),
 				}
 
 				opts.ContentType = obj.ContentType
 				op.Start = time.Now()
-				res, err := client.PutObject(ctx, d.Bucket, obj.Name, obj.Reader, obj.Size, opts)
+				res, err := client.GoClient.PutObject(ctx, d.Bucket, obj.Name, obj.Reader, obj.Size, opts)
 				op.End = time.Now()
 				if err != nil {
 					err := fmt.Errorf("upload error: %w", err)
@@ -247,7 +247,7 @@ func (d *Delete) Start(ctx context.Context, wait chan struct{}) (Operations, err
 					Size:     0,
 					File:     "",
 					ObjPerOp: len(objs),
-					Endpoint: client.EndpointURL().String(),
+					Endpoint: client.GoClient.EndpointURL().String(),
 				}
 				if d.DiscardOutput {
 					op.File = ""
@@ -255,7 +255,7 @@ func (d *Delete) Start(ctx context.Context, wait chan struct{}) (Operations, err
 
 				op.Start = time.Now()
 				// RemoveObjectsWithContext will split any batches > 1000 into separate requests.
-				errCh := client.RemoveObjects(nonTerm, d.Bucket, objects, minio.RemoveObjectsOptions{})
+				errCh := client.GoClient.RemoveObjects(nonTerm, d.Bucket, objects, minio.RemoveObjectsOptions{})
 
 				// Wait for errCh to close.
 				for {

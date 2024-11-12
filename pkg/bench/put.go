@@ -94,18 +94,18 @@ func (u *Put) Start(ctx context.Context, wait chan struct{}) (Operations, error)
 					Size:     obj.Size,
 					ObjPerOp: 1,
 					File:     obj.Name,
-					Endpoint: client.EndpointURL().String(),
+					Endpoint: client.GoClient.EndpointURL().String(),
 				}
 
 				op.Start = time.Now()
 				var err error
 				var res minio.UploadInfo
 				if !u.PostObject {
-					res, err = client.PutObject(nonTerm, u.Bucket, obj.Name, obj.Reader, obj.Size, opts)
+					res, err = client.GoClient.PutObject(nonTerm, u.Bucket, obj.Name, obj.Reader, obj.Size, opts)
 				} else {
 					op.OpType = http.MethodPost
 					var verID string
-					verID, err = u.postPolicy(ctx, client, u.Bucket, obj)
+					verID, err = u.postPolicy(ctx, client.GoClient, u.Bucket, obj)
 					if err == nil {
 						res.Size = obj.Size
 						res.VersionID = verID

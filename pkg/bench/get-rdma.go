@@ -24,31 +24,34 @@ import (
 	"net/http"
 	"sync"
 	"time"
+	"unsafe"
 
+	"github.com/dustin/go-humanize"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/pkg/v2/console"
 	"github.com/minio/warp/pkg/generator"
 )
 
-// Stat benchmarks HEAD speed.
-type Stat struct {
+// GetRDMA benchmarks download speed.
+type GetRDMA struct {
 	Common
 
-	// Default Stat options.
-	StatOpts   minio.StatObjectOptions
+	// Default Get options.
+	GetOpts    minio.GetObjectOptions
 	ListPrefix string
 
 	objects       generator.Objects
 	CreateObjects int
 	Versions      int
-
-	ListExisting bool
-	ListFlat     bool
+	RandomRanges  bool
+	RangeSize     int64
+	ListExisting  bool
+	ListFlat      bool
 }
 
 // Prepare will create an empty bucket or delete any content already there
 // and upload a number of objects.
-func (g *Stat) Prepare(ctx context.Context) error {
+func (g *GetRDMA) Prepare(ctx context.Context) error {
 	// prepare the bench by listing object from the bucket
 	g.addCollector()
 	if g.ListExisting {
@@ -114,6 +117,7 @@ func (g *Stat) Prepare(ctx context.Context) error {
 		return nil
 	}
 
+	// prepare the bench by creating the bucket and pushing some objects
 	if err := g.createEmptyBucket(ctx); err != nil {
 		return err
 	}
@@ -137,17 +141,45 @@ func (g *Stat) Prepare(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 	wg.Add(g.Concurrency)
-	g.addCollector()
+
 	objs := splitObjs(g.CreateObjects, g.Concurrency)
 	rcv := g.Collector.rcv
 	var groupErr error
 	var mu sync.Mutex
+
+	size, err := humanize.ParseBytes(g.CliCtx.String("obj.size"))
+	if err != nil {
+		return err
+	}
 
 	for i, obj := range objs {
 		go func(i int, obj []struct{}) {
 			defer wg.Done()
 			src := g.Source()
 			opts := g.PutOpts
+
+			rbuf := make([]byte, 1)
+			rand.Read(rbuf)
+
+			var buf unsafe.Pointer
+			if g.GPU {
+				buf = minio.AlignedGPU(int(size), rbuf[0])
+			} else {
+				buf = minio.Aligned(int(size), rbuf[0])
+			}
+
+			client, cldone := g.Client()
+			defer cldone()
+
+			free := func(buf unsafe.Pointer) {
+				if g.GPU {
+					minio.FreeGPU(buf)
+				} else {
+					minio.Free(buf)
+				}
+			}
+
+			defer free(buf)
 
 			for range obj {
 				select {
@@ -161,13 +193,11 @@ func (g *Stat) Prepare(ctx context.Context) error {
 				}
 
 				obj := src.Object()
-
 				name := obj.Name
 				for ver := 0; ver < g.Versions; ver++ {
 					// New input for each version
 					obj := src.Object()
 					obj.Name = name
-					client, cldone := g.Client()
 					op := Operation{
 						OpType:   http.MethodPut,
 						Thread:   uint16(i),
@@ -179,7 +209,7 @@ func (g *Stat) Prepare(ctx context.Context) error {
 
 					opts.ContentType = obj.ContentType
 					op.Start = time.Now()
-					res, err := client.GoClient.PutObject(ctx, g.Bucket, obj.Name, obj.Reader, obj.Size, opts)
+					res, err := client.PutObjectRDMA(ctx, g.Bucket, obj.Name, buf, int(size), opts)
 					op.End = time.Now()
 					if err != nil {
 						err := fmt.Errorf("upload error: %w", err)
@@ -192,7 +222,7 @@ func (g *Stat) Prepare(ctx context.Context) error {
 						return
 					}
 					obj.VersionID = res.VersionID
-					if res.Size != obj.Size {
+					if res.Size != int64(size) {
 						err := fmt.Errorf("short upload. want: %d, got %d", obj.Size, res.Size)
 						g.Error(err)
 						mu.Lock()
@@ -202,7 +232,6 @@ func (g *Stat) Prepare(ctx context.Context) error {
 						mu.Unlock()
 						return
 					}
-					cldone()
 					mu.Lock()
 					obj.Reader = nil
 					g.objects = append(g.objects, *obj)
@@ -219,25 +248,53 @@ func (g *Stat) Prepare(ctx context.Context) error {
 
 // Start will execute the main benchmark.
 // Operations should begin executing when the start channel is closed.
-func (g *Stat) Start(ctx context.Context, wait chan struct{}) (Operations, error) {
+func (g *GetRDMA) Start(ctx context.Context, wait chan struct{}) (Operations, error) {
 	var wg sync.WaitGroup
 	wg.Add(g.Concurrency)
 	c := g.Collector
 	if g.AutoTermDur > 0 {
-		ctx = c.AutoTerm(ctx, "STAT", g.AutoTermScale, autoTermCheck, autoTermSamples, g.AutoTermDur)
+		ctx = c.AutoTerm(ctx, http.MethodGet, g.AutoTermScale, autoTermCheck, autoTermSamples, g.AutoTermDur)
 	}
+
+	size, err := humanize.ParseBytes(g.CliCtx.String("obj.size"))
+	if err != nil {
+		return Operations{}, err
+	}
+
 	// Non-terminating context.
 	nonTerm := context.Background()
+	var groupErr error
 
 	for i := 0; i < g.Concurrency; i++ {
 		go func(i int) {
 			rng := rand.New(rand.NewSource(int64(i)))
 			rcv := c.Receiver()
 			defer wg.Done()
-			opts := g.StatOpts
+			opts := g.GetOpts
 			done := ctx.Done()
 
 			<-wait
+
+			var buf unsafe.Pointer
+			if g.GPU {
+				buf = minio.AlignedGPU(int(size), ' ')
+			} else {
+				buf = minio.Aligned(int(size), ' ')
+			}
+
+			client, cldone := g.Client()
+			defer cldone()
+
+			free := func(buf unsafe.Pointer) {
+				if g.GPU {
+					minio.FreeGPU(buf)
+				} else {
+					minio.Free(buf)
+				}
+			}
+
+			defer free(buf)
+
 			for {
 				select {
 				case <-done:
@@ -250,45 +307,63 @@ func (g *Stat) Start(ctx context.Context, wait chan struct{}) (Operations, error
 				}
 
 				obj := g.objects[rng.Intn(len(g.objects))]
-				client, cldone := g.Client()
 				op := Operation{
-					OpType:   "STAT",
+					OpType:   http.MethodGet,
 					Thread:   uint16(i),
-					Size:     0,
+					Size:     obj.Size,
 					File:     obj.Name,
 					ObjPerOp: 1,
 					Endpoint: client.GoClient.EndpointURL().String(),
 				}
+				if g.DiscardOutput {
+					op.File = ""
+				}
 
+				if g.RandomRanges && op.Size > 2 {
+					var start, end int64
+					if g.RangeSize <= 0 {
+						// Randomize length similar to --obj.randsize
+						size := generator.GetExpRandSize(rng, 0, op.Size-2)
+						start = rng.Int63n(op.Size - size)
+						end = start + size
+					} else {
+						start = rng.Int63n(op.Size - g.RangeSize)
+						end = start + g.RangeSize - 1
+					}
+					op.Size = end - start + 1
+					opts.SetRange(start, end)
+				}
 				op.Start = time.Now()
 				var err error
 				if g.Versions > 1 {
 					opts.VersionID = obj.VersionID
 				}
-				objI, err := client.GoClient.StatObject(nonTerm, g.Bucket, obj.Name, opts)
+
+				err = client.GetObjectRDMA(nonTerm, g.Bucket, obj.Name, buf, int(size), opts)
 				if err != nil {
-					g.Error("StatObject error: ", err)
+					g.Error("download error:", err)
 					op.Err = err.Error()
 					op.End = time.Now()
 					rcv <- op
-					cldone()
 					continue
 				}
+				op.FirstByte = &op.Start
 				op.End = time.Now()
-				if objI.Size != obj.Size && op.Err == "" {
-					op.Err = fmt.Sprint("unexpected file size. want:", obj.Size, ", got:", objI.Size)
+				if int64(size) != op.Size && op.Err == "" {
+					op.Err = fmt.Sprint("unexpected download size. want:", op.Size, ", got:", size)
 					g.Error(op.Err)
 				}
 				rcv <- op
-				cldone()
 			}
 		}(i)
 	}
 	wg.Wait()
-	return c.Close(), nil
+	return c.Close(), groupErr
 }
 
 // Cleanup deletes everything uploaded to the bucket.
-func (g *Stat) Cleanup(ctx context.Context) {
-	g.deleteAllInBucket(ctx, g.objects.Prefixes()...)
+func (g *GetRDMA) Cleanup(ctx context.Context) {
+	if !g.ListExisting {
+		g.deleteAllInBucket(ctx, g.objects.Prefixes()...)
+	}
 }

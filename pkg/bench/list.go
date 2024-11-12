@@ -51,7 +51,7 @@ func (d *List) Prepare(ctx context.Context) error {
 	if d.Versions > 1 {
 		cl, done := d.Client()
 		if !d.Versioned {
-			err := cl.EnableVersioning(ctx, d.Bucket)
+			err := cl.GoClient.EnableVersioning(ctx, d.Bucket)
 			if err != nil {
 				return err
 			}
@@ -120,12 +120,12 @@ func (d *List) Prepare(ctx context.Context) error {
 						Size:     obj.Size,
 						File:     obj.Name,
 						ObjPerOp: 1,
-						Endpoint: client.EndpointURL().String(),
+						Endpoint: client.GoClient.EndpointURL().String(),
 					}
 
 					opts.ContentType = obj.ContentType
 					op.Start = time.Now()
-					res, err := client.PutObject(ctx, d.Bucket, obj.Name, obj.Reader, obj.Size, opts)
+					res, err := client.GoClient.PutObject(ctx, d.Bucket, obj.Name, obj.Reader, obj.Size, opts)
 					op.End = time.Now()
 					if err != nil {
 						err := fmt.Errorf("upload error: %w", err)
@@ -213,13 +213,13 @@ func (d *List) Start(ctx context.Context, wait chan struct{}) (Operations, error
 					OpType:   "LIST",
 					Thread:   uint16(i),
 					Size:     0,
-					Endpoint: client.EndpointURL().String(),
+					Endpoint: client.GoClient.EndpointURL().String(),
 				}
 
 				op.Start = time.Now()
 
 				// List all objects with prefix
-				listCh := client.ListObjects(nonTerm, d.Bucket, minio.ListObjectsOptions{
+				listCh := client.GoClient.ListObjects(nonTerm, d.Bucket, minio.ListObjectsOptions{
 					WithMetadata: d.Metadata,
 					Prefix:       objs[0].Prefix,
 					Recursive:    true,

@@ -57,7 +57,7 @@ func (g *Get) Prepare(ctx context.Context) error {
 		cl, done := g.Client()
 
 		// ensure the bucket exist
-		found, err := cl.BucketExists(ctx, g.Bucket)
+		found, err := cl.GoClient.BucketExists(ctx, g.Bucket)
 		if err != nil {
 			return err
 		}
@@ -68,7 +68,7 @@ func (g *Get) Prepare(ctx context.Context) error {
 		// list all objects
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
-		objectCh := cl.ListObjects(ctx, g.Bucket, minio.ListObjectsOptions{
+		objectCh := cl.GoClient.ListObjects(ctx, g.Bucket, minio.ListObjectsOptions{
 			WithVersions: g.Versions > 1,
 			Prefix:       g.ListPrefix,
 			Recursive:    !g.ListFlat,
@@ -123,7 +123,7 @@ func (g *Get) Prepare(ctx context.Context) error {
 	if g.Versions > 1 {
 		cl, done := g.Client()
 		if !g.Versioned {
-			err := cl.EnableVersioning(ctx, g.Bucket)
+			err := cl.GoClient.EnableVersioning(ctx, g.Bucket)
 			if err != nil {
 				return err
 			}
@@ -177,12 +177,12 @@ func (g *Get) Prepare(ctx context.Context) error {
 						Size:     obj.Size,
 						File:     obj.Name,
 						ObjPerOp: 1,
-						Endpoint: client.EndpointURL().String(),
+						Endpoint: client.GoClient.EndpointURL().String(),
 					}
 
 					opts.ContentType = obj.ContentType
 					op.Start = time.Now()
-					res, err := client.PutObject(ctx, g.Bucket, obj.Name, obj.Reader, obj.Size, opts)
+					res, err := client.GoClient.PutObject(ctx, g.Bucket, obj.Name, obj.Reader, obj.Size, opts)
 					op.End = time.Now()
 					if err != nil {
 						err := fmt.Errorf("upload error: %w", err)
@@ -280,7 +280,7 @@ func (g *Get) Start(ctx context.Context, wait chan struct{}) (Operations, error)
 					Size:     obj.Size,
 					File:     obj.Name,
 					ObjPerOp: 1,
-					Endpoint: client.EndpointURL().String(),
+					Endpoint: client.GoClient.EndpointURL().String(),
 				}
 				if g.DiscardOutput {
 					op.File = ""
@@ -305,7 +305,7 @@ func (g *Get) Start(ctx context.Context, wait chan struct{}) (Operations, error)
 				if g.Versions > 1 {
 					opts.VersionID = obj.VersionID
 				}
-				o, err := client.GetObject(nonTerm, g.Bucket, obj.Name, opts)
+				o, err := client.GoClient.GetObject(nonTerm, g.Bucket, obj.Name, opts)
 				if err != nil {
 					g.Error("download error:", err)
 					op.Err = err.Error()

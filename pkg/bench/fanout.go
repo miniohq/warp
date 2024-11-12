@@ -94,11 +94,11 @@ func (u *Fanout) Start(ctx context.Context, wait chan struct{}) (Operations, err
 					Size:     obj.Size * int64(u.Copies),
 					ObjPerOp: u.Copies,
 					File:     obj.Name,
-					Endpoint: client.EndpointURL().String(),
+					Endpoint: client.GoClient.EndpointURL().String(),
 				}
 
 				op.Start = time.Now()
-				res, err := client.PutObjectFanOut(nonTerm, u.Bucket, obj.Reader, opts)
+				res, err := client.GoClient.PutObjectFanOut(nonTerm, u.Bucket, obj.Reader, opts)
 				op.End = time.Now()
 				if err != nil {
 					u.Error("upload error: ", err)

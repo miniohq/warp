@@ -56,7 +56,7 @@ func (g *Multipart) InitOnce(ctx context.Context) error {
 	console.Info("\rCreating Object...")
 
 	cl, done := g.Client()
-	c := minio.Core{Client: cl}
+	c := minio.Core{Client: cl.GoClient}
 	defer done()
 	uploadID, err := c.NewMultipartUpload(ctx, g.Bucket, g.ObjName, g.PutOpts)
 	if err != nil {
@@ -114,14 +114,14 @@ func (g *Multipart) Prepare(ctx context.Context) error {
 				obj := src.Object()
 				obj.Name = name
 				client, cldone := g.Client()
-				core := minio.Core{Client: client}
+				core := minio.Core{Client: client.GoClient}
 				op := Operation{
 					OpType:   http.MethodPut,
 					Thread:   uint16(i),
 					Size:     obj.Size,
 					File:     obj.Name,
 					ObjPerOp: 1,
-					Endpoint: client.EndpointURL().String(),
+					Endpoint: client.GoClient.EndpointURL().String(),
 				}
 				if g.DiscardOutput {
 					op.File = ""
@@ -173,7 +173,7 @@ func (g *Multipart) Prepare(ctx context.Context) error {
 
 func (g *Multipart) AfterPrepare(ctx context.Context) error {
 	cl, done := g.Client()
-	c := minio.Core{Client: cl}
+	c := minio.Core{Client: cl.GoClient}
 	defer done()
 	var parts []minio.CompletePart
 	i := 1
@@ -235,12 +235,12 @@ func (g *Multipart) Start(ctx context.Context, wait chan struct{}) (Operations, 
 					Size:     obj.Size,
 					File:     obj.Name,
 					ObjPerOp: 1,
-					Endpoint: client.EndpointURL().String(),
+					Endpoint: client.GoClient.EndpointURL().String(),
 				}
 
 				op.Start = time.Now()
 				opts.PartNumber = part
-				o, err := client.GetObject(nonTerm, g.Bucket, obj.Name, opts)
+				o, err := client.GoClient.GetObject(nonTerm, g.Bucket, obj.Name, opts)
 				if err != nil {
 					g.Error("download error:", err)
 					op.Err = err.Error()

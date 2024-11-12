@@ -161,11 +161,11 @@ func (s *Snowball) Start(ctx context.Context, wait chan struct{}) (Operations, e
 				opts.DisableMultipart = true
 
 				client, cldone := s.Client()
-				op.Endpoint = client.EndpointURL().String()
+				op.Endpoint = client.GoClient.EndpointURL().String()
 				op.Start = time.Now()
 				tarLength := int64(buf.Len())
 				// fmt.Println(op.Size, "->", tarLength, math.Round(100*float64(tarLength)/float64(op.Size)), "%")
-				res, err := client.PutObject(nonTerm, s.Bucket, obj.Name+".tar", &buf, tarLength, opts)
+				res, err := client.GoClient.PutObject(nonTerm, s.Bucket, obj.Name+".tar", &buf, tarLength, opts)
 				op.End = time.Now()
 				if err != nil {
 					s.Error("upload error: ", err)

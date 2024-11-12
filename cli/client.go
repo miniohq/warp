@@ -52,7 +52,7 @@ const (
 	hostSelectTypeWeighed    hostSelectType = "weighed"
 )
 
-func newClient(ctx *cli.Context) func() (cl *minio.Client, done func()) {
+func newClient(ctx *cli.Context) func() (cl *minio.MetaClient, done func()) {
 	hosts := parseHosts(ctx.String("host"), ctx.Bool("resolve-host"))
 	switch len(hosts) {
 	case 0:
@@ -61,7 +61,7 @@ func newClient(ctx *cli.Context) func() (cl *minio.Client, done func()) {
 		cl, err := getClient(ctx, hosts[0])
 		fatalIf(probe.NewError(err), "Unable to create MinIO client")
 
-		return func() (*minio.Client, func()) {
+		return func() (*minio.MetaClient, func()) {
 			return cl, func() {}
 		}
 	}
@@ -71,13 +71,13 @@ func newClient(ctx *cli.Context) func() (cl *minio.Client, done func()) {
 		// Do round-robin.
 		var current int
 		var mu sync.Mutex
-		clients := make([]*minio.Client, len(hosts))
+		clients := make([]*minio.MetaClient, len(hosts))
 		for i := range hosts {
 			cl, err := getClient(ctx, hosts[i])
 			fatalIf(probe.NewError(err), "Unable to create MinIO client")
 			clients[i] = cl
 		}
-		return func() (*minio.Client, func()) {
+		return func() (*minio.MetaClient, func()) {
 			mu.Lock()
 			now := current % len(clients)
 			current++
@@ -88,7 +88,7 @@ func newClient(ctx *cli.Context) func() (cl *minio.Client, done func()) {
 		// Keep track of handed out clients.
 		// Select random between the clients that have the fewest handed out.
 		var mu sync.Mutex
-		clients := make([]*minio.Client, len(hosts))
+		clients := make([]*minio.MetaClient, len(hosts))
 		for i := range hosts {
 			cl, err := getClient(ctx, hosts[i])
 			fatalIf(probe.NewError(err), "Unable to create MinIO client")
@@ -123,7 +123,7 @@ func newClient(ctx *cli.Context) func() (cl *minio.Client, done func()) {
 			}
 			return earliestIdx
 		}
-		return func() (*minio.Client, func()) {
+		return func() (*minio.MetaClient, func()) {
 			mu.Lock()
 			idx := find()
 			running[idx]++
@@ -144,8 +144,7 @@ func newClient(ctx *cli.Context) func() (cl *minio.Client, done func()) {
 	return nil
 }
 
-// getClient creates a client with the specified host and the options set in the context.
-func getClient(ctx *cli.Context, host string) (*minio.Client, error) {
+func getClient(ctx *cli.Context, host string) (*minio.MetaClient, error) {
 	var creds *credentials.Credentials
 	switch strings.ToUpper(ctx.String("signature")) {
 	case "S3V4":
@@ -157,13 +156,15 @@ func getClient(ctx *cli.Context, host string) (*minio.Client, error) {
 	default:
 		fatal(probe.NewError(errors.New("unknown signature method. S3V2 and S3V4 is available")), strings.ToUpper(ctx.String("signature")))
 	}
+
 	lookup := minio.BucketLookupAuto
 	if ctx.String("lookup") == "host" {
 		lookup = minio.BucketLookupDNS
 	} else if ctx.String("lookup") == "path" {
 		lookup = minio.BucketLookupPath
 	}
-	cl, err := minio.New(host, &minio.Options{
+
+	cl, err := minio.NewC(host, &minio.Options{
 		Creds:        creds,
 		Secure:       ctx.Bool("tls"),
 		Region:       ctx.String("region"),
@@ -174,10 +175,10 @@ func getClient(ctx *cli.Context, host string) (*minio.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	cl.SetAppInfo(appName, pkg.Version)
+	cl.GoClient.SetAppInfo(appName, pkg.Version)
 
 	if ctx.Bool("debug") {
-		cl.TraceOn(os.Stderr)
+		cl.GoClient.TraceOn(os.Stderr)
 	}
 
 	return cl, nil
