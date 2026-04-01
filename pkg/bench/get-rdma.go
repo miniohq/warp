@@ -163,7 +163,7 @@ func (g *GetRDMA) Prepare(ctx context.Context) error {
 
 			var buf unsafe.Pointer
 			if g.GPU {
-				buf = minio.AlignedGPU(int(size), rbuf[0])
+				buf, _ = minio.AlignedGPU(int(size), rbuf[0])
 			} else {
 				buf = minio.Aligned(int(size), rbuf[0])
 			}
@@ -277,7 +277,7 @@ func (g *GetRDMA) Start(ctx context.Context, wait chan struct{}) (Operations, er
 
 			var buf unsafe.Pointer
 			if g.GPU {
-				buf = minio.AlignedGPU(int(size), ' ')
+				buf, _ = minio.AlignedGPU(int(size), ' ')
 			} else {
 				buf = minio.Aligned(int(size), ' ')
 			}

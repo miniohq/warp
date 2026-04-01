@@ -155,7 +155,7 @@ func (u *PutRDMA) Start(ctx context.Context, wait chan struct{}) (Operations, er
 
 			var buf unsafe.Pointer
 			if u.GPU {
-				buf = minio.AlignedGPU(int(size), rbuf[0])
+				buf, _ = minio.AlignedGPU(int(size), rbuf[0])
 			} else {
 				buf = minio.Aligned(int(size), rbuf[0])
 			}
